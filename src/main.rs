@@ -5,7 +5,7 @@ mod state;
 use crate::state::AppState;
 use axum::{
     Router,
-    routing::{get, post, put}
+    routing::{get, post, put},
 };
 use std::sync::Arc;
 

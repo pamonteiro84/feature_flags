@@ -201,3 +201,94 @@ pub fn evaluate(
         reason: "global".to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use chrono::Utc;
+
+    fn make_state() -> AppState {
+        AppState::new()
+    }
+
+    fn make_flag(key: &str, enabled: bool) -> FeatureFlag {
+        FeatureFlag {
+            key: key.to_string(),
+            name: "Test Flag".to_string(),
+            enabled,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn make_override(flag_key: &str, user_id: &str, enabled: bool) -> Override {
+        Override {
+            flag_key: flag_key.to_string(),
+            user_id: user_id.to_string(),
+            enabled,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_evaluate_returns_global_when_no_override() {
+        let state = make_state();
+        state
+            .flags
+            .insert("my-flag".into(), make_flag("my-flag", true));
+
+        let result = evaluate("my-flag", "user-1", &state).unwrap();
+
+        assert_eq!(result.enabled, true);
+        assert_eq!(result.reason, "global");
+    }
+
+    #[test]
+    fn test_evaluate_returns_override_when_exists() {
+        let state = make_state();
+        state
+            .flags
+            .insert("my-flag".into(), make_flag("my-flag", false));
+
+        let mut map = HashMap::new();
+        map.insert(
+            "user-1".to_string(),
+            make_override("my-flag", "user-1", true),
+        );
+        state.overrides.insert("my-flag".into(), map);
+
+        let result = evaluate("my-flag", "user-1", &state).unwrap();
+
+        assert_eq!(result.enabled, true);
+        assert_eq!(result.reason, "user_override");
+    }
+
+    #[test]
+    fn test_evaluate_override_wins_over_global() {
+        let state = make_state();
+        state
+            .flags
+            .insert("my-flag".into(), make_flag("my-flag", true));
+
+        let mut map = HashMap::new();
+        map.insert(
+            "user-1".to_string(),
+            make_override("my-flag", "user-1", false),
+        );
+        state.overrides.insert("my-flag".into(), map);
+
+        let result = evaluate("my-flag", "user-1", &state).unwrap();
+
+        assert_eq!(result.enabled, false);
+        assert_eq!(result.reason, "user_override");
+    }
+
+    #[test]
+    fn test_evaluate_returns_error_when_flag_not_found() {
+        let state = make_state();
+
+        let result = evaluate("missing-flag", "user-1", &state);
+
+        assert!(result.is_err());
+    }
+}
