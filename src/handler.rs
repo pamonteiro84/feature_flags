@@ -1,13 +1,14 @@
 use crate::{
     errors::AppError,
     models::{
-        CreateFlagRequest, FeatureFlag, FlagResponse, Override, OverrideResponse, ToggleRequest,
+        CreateFlagRequest, EvaluationResponse, FeatureFlag, FlagResponse, Override,
+        OverrideResponse, ToggleRequest,
     },
     state::AppState,
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
@@ -24,7 +25,6 @@ pub async fn create_flag(
     if normalized_key.is_empty() {
         return Err(AppError::BadRequest("Key cannot be empty".to_string()));
     }
-
     if !normalized_key
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
@@ -33,11 +33,9 @@ pub async fn create_flag(
             "Key can only contain alphanumeric characters, underscores, and hyphens".to_string(),
         ));
     }
-
     if payload.name.trim().is_empty() {
         return Err(AppError::BadRequest("Name cannot be empty".to_string()));
     }
-
     if state.flags.contains_key(&normalized_key) {
         return Err(AppError::Conflict(format!(
             "Feature flag with key '{}' already exists",
@@ -51,7 +49,6 @@ pub async fn create_flag(
         enabled: payload.enabled,
         created_at: Utc::now(),
     };
-
     state.flags.insert(normalized_key.clone(), flag.clone());
 
     let response = FlagResponse {
@@ -103,7 +100,14 @@ pub async fn toggle_flag(
 
     flag.enabled = payload.enabled;
 
-    Ok(StatusCode::NO_CONTENT)
+    let response = FlagResponse {
+        key: flag.key.clone(),
+        name: flag.name.clone(),
+        enabled: flag.enabled,
+        created_at: flag.created_at,
+    };
+
+    Ok(Json(response))
 }
 
 pub async fn set_override(
@@ -145,4 +149,55 @@ pub async fn set_override(
     };
 
     Ok(Json(response))
+}
+
+pub async fn evaluate_flag(
+    State(state): State<Arc<AppState>>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<impl IntoResponse, AppError> {
+    let normalized_key = key.trim().to_ascii_lowercase();
+
+    let user_id = params
+        .get("user_id")
+        .ok_or_else(|| AppError::BadRequest("user_id is required".to_string()))?
+        .trim()
+        .to_string();
+
+    if user_id.is_empty() {
+        return Err(AppError::BadRequest("user_id cannot be empty".to_string()));
+    }
+
+    let result = evaluate(&normalized_key, &user_id, &state)?;
+
+    Ok(Json(result))
+}
+
+pub fn evaluate(
+    key: &str,
+    user_id: &str,
+    state: &AppState,
+) -> Result<EvaluationResponse, AppError> {
+    let flag = state
+        .flags
+        .get(key)
+        .ok_or_else(|| AppError::NotFound(format!("Feature flag with key '{}' not found", key)))?;
+
+    if let Some(overrides) = state.overrides.get(key) {
+        if let Some(override_entry) = overrides.get(user_id) {
+            return Ok(EvaluationResponse {
+                flag_key: key.to_string(),
+                user_id: user_id.to_string(),
+                enabled: override_entry.enabled,
+                reason: "user_override".to_string(),
+            });
+        }
+    }
+
+    Ok(EvaluationResponse {
+        flag_key: key.to_string(),
+        user_id: user_id.to_string(),
+        enabled: flag.enabled,
+        reason: "global".to_string(),
+    })
 }
