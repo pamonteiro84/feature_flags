@@ -1,6 +1,8 @@
 use crate::{
     errors::AppError,
-    models::{CreateFlagRequest, FeatureFlag, FlagResponse, Override},
+    models::{
+        CreateFlagRequest, FeatureFlag, FlagResponse, Override, OverrideResponse, ToggleRequest,
+    },
     state::AppState,
 };
 use axum::{
@@ -10,6 +12,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub async fn create_flag(
@@ -79,6 +82,66 @@ pub async fn get_flag(
         name: flag.name.clone(),
         enabled: flag.enabled,
         created_at: flag.created_at,
+    };
+
+    Ok(Json(response))
+}
+
+pub async fn toggle_flag(
+    State(state): State<Arc<AppState>>,
+    Path(key): Path<String>,
+    Json(payload): Json<ToggleRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let normalized_key = key.trim().to_ascii_lowercase();
+
+    let mut flag = state.flags.get_mut(&normalized_key).ok_or_else(|| {
+        AppError::NotFound(format!(
+            "Feature flag with key '{}' not found",
+            normalized_key
+        ))
+    })?;
+
+    flag.enabled = payload.enabled;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn set_override(
+    State(state): State<Arc<AppState>>,
+    Path((key, user_id)): Path<(String, String)>,
+    Json(payload): Json<ToggleRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let normalized_key = key.trim().to_ascii_lowercase();
+    let normalized_user_id = user_id.trim().to_string();
+
+    if normalized_user_id.is_empty() {
+        return Err(AppError::BadRequest("User ID cannot be empty".to_string()));
+    }
+    if !state.flags.contains_key(&normalized_key) {
+        return Err(AppError::NotFound(format!(
+            "Feature flag with key '{}' not found",
+            normalized_key
+        )));
+    }
+
+    let override_entry = Override {
+        flag_key: normalized_key.clone(),
+        user_id: normalized_user_id.clone(),
+        enabled: payload.enabled,
+        created_at: Utc::now(),
+    };
+
+    state
+        .overrides
+        .entry(normalized_key)
+        .or_insert_with(HashMap::new)
+        .insert(normalized_user_id, override_entry.clone());
+
+    let response = OverrideResponse {
+        flag_key: override_entry.flag_key,
+        user_id: override_entry.user_id,
+        enabled: override_entry.enabled,
+        created_at: override_entry.created_at,
     };
 
     Ok(Json(response))
