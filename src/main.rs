@@ -1,4 +1,5 @@
 mod errors;
+mod handler;
 mod models;
 mod state;
 
