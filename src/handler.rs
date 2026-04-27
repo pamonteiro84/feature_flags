@@ -183,8 +183,8 @@ pub fn evaluate(
         .get(key)
         .ok_or_else(|| AppError::NotFound(format!("Feature flag with key '{}' not found", key)))?;
 
-    if let Some(overrides) = state.overrides.get(key) {
-        if let Some(override_entry) = overrides.get(user_id) {
+    if let Some(overrides) = state.overrides.get(key)
+        && let Some(override_entry) = overrides.get(user_id) {
             return Ok(EvaluationResponse {
                 flag_key: key.to_string(),
                 user_id: user_id.to_string(),
@@ -192,7 +192,6 @@ pub fn evaluate(
                 reason: "user_override".to_string(),
             });
         }
-    }
 
     Ok(EvaluationResponse {
         flag_key: key.to_string(),
@@ -239,7 +238,7 @@ mod tests {
 
         let result = evaluate("my-flag", "user-1", &state).unwrap();
 
-        assert_eq!(result.enabled, true);
+        assert!(result.enabled);
         assert_eq!(result.reason, "global");
     }
 
